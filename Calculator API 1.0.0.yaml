@@ -1,0 +1,238 @@
+swagger: '2.0'
+info:
+  version: 1.0.0
+  title: Calculator API
+  x-ibm-name: Calculator-API
+  contact:
+    name: Chris Bygrave
+    email: bygravec@uk.ibm.com
+    url: 'http://www.ibm.com'
+host: $(catalog.host)
+basePath: /calculate
+paths:
+  /divide:
+    post:
+      responses:
+        '200':
+          description: 200 OK
+          schema:
+            $ref: '#/definitions/integerResult'
+        '400':
+          description: Divide by zero
+          schema:
+            $ref: '#/definitions/Error'
+      parameters:
+        - name: divisor
+          type: integer
+          required: false
+          in: query
+          format: int32
+          description: The divisor
+        - name: numerator
+          type: integer
+          required: false
+          in: query
+          description: The numerator
+          format: int32
+  /multiply:
+    post:
+      responses:
+        '200':
+          description: 200 OK
+          schema:
+            $ref: '#/definitions/integerResult'
+      parameters:
+        - $ref: '#/parameters/twoIntegerBody'
+  /add:
+    post:
+      responses:
+        '200':
+          description: 200 OK
+          schema:
+            $ref: '#/definitions/integerResult'
+      parameters:
+        - $ref: '#/parameters/IntegerArrayBody'
+securityDefinitions:
+  clientID:
+    description: ''
+    in: header
+    name: X-IBM-Client-Id
+    type: apiKey
+security:
+  - clientID: []
+x-ibm-configuration:
+  assembly:
+    execute:
+      - activity-log:
+          title: activity-log
+          content: activity
+          error-content: payload
+      - if:
+          title: if user provided xml
+          condition: 'request.headers.content-type === "application/xml"'
+          execute:
+            - xml-to-json:
+                title: xml-to-json
+      - operation-switch:
+          title: handle the operation
+          case:
+            - operations:
+                - verb: post
+                  path: /add
+              execute:
+                - map:
+                    title: Add integers
+                    inputs:
+                      input:
+                        schema:
+                          $ref: '#/definitions/IntegerArray'
+                        variable: request.body
+                    outputs:
+                      output:
+                        schema:
+                          $ref: '#/definitions/integerResult'
+                        variable: message.body
+                    actions:
+                      - set: output.result
+                        from: input
+                        foreach: input
+                        value: $(.) + $(input)
+            - operations:
+                - verb: post
+                  path: /multiply
+              execute:
+                - map:
+                    title: Multiply integers
+                    inputs:
+                      input:
+                        schema:
+                          $ref: '#/definitions/twoIntegers'
+                        variable: request.body
+                    outputs:
+                      output:
+                        schema:
+                          $ref: '#/definitions/integerResult'
+                        variable: message.body
+                    actions:
+                      - set: output.result
+                        from:
+                          - input.integer2
+                          - input.integer1
+                        value: '$(input.integer2) * $(input.integer1)'
+            - operations:
+                - verb: post
+                  path: /divide
+              execute:
+                - if:
+                    title: if divisor is zero
+                    condition: request.parameters.divisor == 0
+                    execute:
+                      - throw:
+                          title: throw
+                          name: DivideByZeroError
+                - map:
+                    title: Divide numerator by divisor
+                    inputs:
+                      numerator:
+                        schema:
+                          type: integer
+                        variable: request.parameters.numerator
+                      divisor:
+                        schema:
+                          type: integer
+                        variable: request.parameters.divisor
+                    outputs:
+                      output:
+                        schema:
+                          $ref: '#/definitions/integerResult'
+                        variable: message.body
+                    actions:
+                      - set: output.result
+                        from:
+                          - numerator
+                          - divisor
+                        value: $(numerator) / $(divisor)
+      - if:
+          title: if user requested xml
+          condition: 'request.headers.accept === "application/xml"'
+          execute:
+            - json-to-xml:
+                title: json-to-xml
+                root-element-name: json
+                always-output-root-element: false
+    catch:
+      - errors:
+          - DivideByZeroError
+        execute:
+          - set-variable:
+              title: Rewrite Error
+              actions:
+                - set: message.body
+                  value: "{\"message\":\"I'm sorry Dave, I'm afraid I can't let you do that\"}"
+                - set: message.statusCode
+                  value: '400'
+                - set: message.headers.content-type
+                  value: application/json
+  enforced: true
+  testable: true
+  phase: realized
+  cors:
+    enabled: true
+  gateway: datapower-gateway
+schemes:
+  - https
+produces:
+  - application/json
+  - application/xml
+consumes:
+  - application/json
+  - application/xml
+definitions:
+  IntegerArray:
+    type: array
+    items:
+      type: integer
+      format: int32
+    description: Array of integers
+  Error:
+    properties:
+      message:
+        type: string
+        description: The error message
+    description: Standard error response
+    required:
+      - message
+  integerResult:
+    properties:
+      result:
+        type: integer
+        format: int32
+    additionalProperties: true
+    required:
+      - result
+  twoIntegers:
+    properties:
+      integer2:
+        type: integer
+        format: int32
+      integer1:
+        type: integer
+        format: int32
+    required:
+      - integer1
+      - integer2
+parameters:
+  twoIntegerBody:
+    name: twoIntegerBody
+    required: true
+    in: body
+    schema:
+      $ref: '#/definitions/twoIntegers'
+      type: twoIntegers
+  IntegerArrayBody:
+    name: IntegerArrayBody
+    required: true
+    in: body
+    schema:
+      $ref: '#/definitions/IntegerArray'
+      type: IntegerArray
